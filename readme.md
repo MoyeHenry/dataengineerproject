@@ -1,0 +1,9 @@
+order_id,customer,product,amount,date
+1001,John,Laptop,2000,2026-01,01
+1002,Mary,Generator,1500,2027-01-01
+1003,David,Monitor,350,2026-01-03
+1004,Sarah,Mouse,50,2026-01-04
+1005,Peter,Keyboard,120,2026-01-05
+1006,Grace,Laptop,1250,2026-01-06
+1007,Micheal,Phone,850,2026-01-07
+1008,Ada,Monitor,375,2026-01-08

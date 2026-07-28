@@ -1,0 +1,201 @@
+# Import libraries for file handling, data cleaning, and database loading.
+from pathlib import Path
+
+import pandas as pd
+from sqlalchemy import create_engine
+
+
+# Define source file, target table, and PostgreSQL connection.
+BASE_DIR = Path(__file__).resolve().parents[1]
+SOURCE_FILE = BASE_DIR / "data" / "Student_Social_Media_Health_Impact.csv"
+TABLE_NAME = "student_social_media_mental_health"
+engine = create_engine("postgresql://postgres:12345@localhost:5432/salesdb")
+
+
+# Load the raw student social media and mental health dataset.
+df = pd.read_csv(SOURCE_FILE)
+print(f"Raw dataset loaded: {df.shape[0]} rows and {df.shape[1]} columns")
+
+
+# Standardize column names to database-friendly snake_case.
+df.columns = (
+    df.columns.str.strip()
+    .str.lower()
+    .str.replace(" ", "_", regex=False)
+    .str.replace(r"[^a-z0-9_]", "", regex=True)
+)
+
+
+# Remove exact duplicate records.
+duplicate_count = df.duplicated().sum()
+df = df.drop_duplicates().reset_index(drop=True)
+print(f"Duplicate rows removed: {duplicate_count}")
+
+
+# Trim text fields and standardize repeated spaces.
+text_columns = [
+    "gender",
+    "country",
+    "academic_level",
+    "most_used_platform",
+    "purpose_of_use",
+    "stress_level",
+]
+for column in text_columns:
+    df[column] = df[column].astype("string").str.strip().str.replace(r"\s+", " ", regex=True)
+
+
+# Convert numeric fields safely and report any conversion issues.
+numeric_columns = [
+    "age",
+    "avg_daily_usage_hours",
+    "daily_unlocks",
+    "study_hours",
+    "physical_activity_hours",
+    "sleep_hours_per_night",
+    "mental_health_score",
+]
+for column in numeric_columns:
+    df[column] = pd.to_numeric(df[column], errors="coerce")
+
+missing_after_conversion = df[numeric_columns + text_columns].isna().sum()
+print("Missing values after type conversion:")
+print(missing_after_conversion[missing_after_conversion > 0])
+
+
+# Drop records with missing values in required analytical columns.
+df = df.dropna(subset=numeric_columns + text_columns).reset_index(drop=True)
+
+
+# Keep only realistic values for student wellbeing and usage metrics.
+valid_rows = (
+    df["age"].between(10, 100)
+    & df["avg_daily_usage_hours"].between(0, 24)
+    & df["daily_unlocks"].between(0, 1000)
+    & df["study_hours"].between(0, 24)
+    & df["physical_activity_hours"].between(0, 24)
+    & df["sleep_hours_per_night"].between(0, 24)
+    & df["mental_health_score"].between(0, 10)
+)
+invalid_count = (~valid_rows).sum()
+df = df.loc[valid_rows].reset_index(drop=True)
+print(f"Invalid range rows removed: {invalid_count}")
+
+
+# Convert integer-like metrics to nullable integer database types.
+df["age"] = df["age"].round().astype("Int64")
+df["daily_unlocks"] = df["daily_unlocks"].round().astype("Int64")
+
+
+# Add ordinal stress score for easier analysis in SQL and BI tools.
+stress_score_map = {
+    "Low": 1,
+    "Medium": 2,
+    "High": 3,
+    "Very High": 4,
+}
+df["stress_score"] = df["stress_level"].map(stress_score_map).astype("Int64")
+
+
+# Create analytical usage, sleep, activity, and mental health bands.
+df["usage_category"] = pd.cut(
+    df["avg_daily_usage_hours"],
+    bins=[-0.01, 2, 5, 8, 24],
+    labels=["low", "moderate", "high", "very_high"],
+)
+df["sleep_category"] = pd.cut(
+    df["sleep_hours_per_night"],
+    bins=[-0.01, 6, 8, 24],
+    labels=["short_sleep", "healthy_sleep", "long_sleep"],
+)
+df["activity_category"] = pd.cut(
+    df["physical_activity_hours"],
+    bins=[-0.01, 1, 2.5, 24],
+    labels=["low_activity", "moderate_activity", "high_activity"],
+)
+df["mental_health_category"] = pd.cut(
+    df["mental_health_score"],
+    bins=[-0.01, 4, 7, 10],
+    labels=["low", "moderate", "high"],
+)
+
+
+# Add practical derived indicators for downstream analysis.
+df["screen_to_study_ratio"] = (
+    df["avg_daily_usage_hours"] / df["study_hours"].replace(0, pd.NA)
+).round(2)
+df["unlocks_per_usage_hour"] = (
+    df["daily_unlocks"] / df["avg_daily_usage_hours"].replace(0, pd.NA)
+).round(2)
+df["high_social_media_use"] = df["avg_daily_usage_hours"] >= 6
+df["low_sleep_flag"] = df["sleep_hours_per_night"] < 6
+df["high_stress_flag"] = df["stress_level"].isin(["High", "Very High"])
+
+
+# Convert category fields to strings for clean PostgreSQL text storage.
+category_columns = [
+    "usage_category",
+    "sleep_category",
+    "activity_category",
+    "mental_health_category",
+]
+for column in category_columns:
+    df[column] = df[column].astype("string")
+
+
+# Round decimal metrics for consistent storage.
+decimal_columns = [
+    "avg_daily_usage_hours",
+    "study_hours",
+    "physical_activity_hours",
+    "sleep_hours_per_night",
+    "mental_health_score",
+]
+df[decimal_columns] = df[decimal_columns].round(2)
+
+
+# Reorder columns into raw attributes first, followed by engineered features.
+df = df[
+    [
+        "age",
+        "gender",
+        "country",
+        "academic_level",
+        "most_used_platform",
+        "purpose_of_use",
+        "avg_daily_usage_hours",
+        "daily_unlocks",
+        "study_hours",
+        "physical_activity_hours",
+        "sleep_hours_per_night",
+        "stress_level",
+        "mental_health_score",
+        "stress_score",
+        "usage_category",
+        "sleep_category",
+        "activity_category",
+        "mental_health_category",
+        "screen_to_study_ratio",
+        "unlocks_per_usage_hour",
+        "high_social_media_use",
+        "low_sleep_flag",
+        "high_stress_flag",
+    ]
+]
+
+# Print a concise quality summary before loading.
+print(f"Cleaned dataset ready: {df.shape[0]} rows and {df.shape[1]} columns")
+print(df.head())
+print(df.info())
+
+# Load the cleaned and transformed dataframe into PostgreSQL.
+df.to_sql(
+    TABLE_NAME,
+    engine,
+    if_exists="replace",
+    index=False,
+    chunksize=1000,
+    method="multi",
+)
+
+print(f"Data has been successfully loaded into PostgreSQL table: {TABLE_NAME}")

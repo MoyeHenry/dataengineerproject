@@ -1,0 +1,60 @@
+import pandas as pd
+
+df = pd.read_csv("./data/sales.csv")
+print(df.head())
+
+df = pd.read_csv("./data/sales.csv")
+print(df.info())
+
+df = pd.read_csv("./data/sales.csv")
+print(df.describe())
+print(df.head())
+
+
+df = pd.read_csv("./data/sales.csv")
+df.drop_duplicates(inplace=True)
+print(df)
+
+df['data'] = pd.to_datetime(df['date'])
+print(df.head())
+
+df = pd.read_csv("./data/sales.csv")
+df['date'] = pd.to_datetime(df['date'])
+df['month'] = df['date'].dt.month
+df['year'] =df['date'].dt.year
+print(df.head())
+
+
+print("data load Successfully.")
+
+
+
+import pandas as pd
+from sqlalchemy import create_engine
+
+df = pd.read_csv("./data/sales.csv")
+df.dropna(" ",inplace=True)
+print(df)
+
+
+
+import pandas as pd
+from sqlalchemy import create_engine
+
+df = pd.read_csv("./data/sales.csv")
+print(df)
+
+
+
+engine = create_engine(
+    "postgresql://postgres:password@localhost:5432/sales_db"
+)
+
+engine = create_engine("postgresql://postgres:12345@localhost:5432/salesdb")
+df.to_sql(
+    "sales",
+    engine,
+    if_exists="replace",
+    index=False
+)
+print("Data has been successfully loaded into the database.")
